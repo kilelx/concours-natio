@@ -4,6 +4,45 @@ Prototype de système de traçabilité d'outillage en temps réel. Simule un app
 
 ---
 
+## Utilisation
+
+### 1. Générer les étiquettes QR
+
+Ouvre [`/labels`](http://localhost:3000/labels) — la grille affiche les 12 outils avec leur QR code. Imprime avec **Cmd+P** (fond blanc forcé, optimisé impression). Chaque QR encode l'ID de l'outil (`FC-001`, `FC-002`…).
+
+### 2. Scanner un outil
+
+Deux modes disponibles depuis [`/simulator`](http://localhost:3000/simulator) :
+
+**Mode caméra (démo réelle)**
+1. Sélectionne un technicien parmi les 4 disponibles
+2. Clique **"Scanner l'outil"** — la caméra du Mac s'ouvre
+3. Pointe le QR code imprimé dans le cadre
+4. Le scan se déclenche automatiquement dès détection
+5. Cooldown 2,5 s avant de pouvoir rescanner le même outil
+
+**Mode manuel (démo rapide)**
+1. Sélectionne technicien + outil dans la liste
+2. Clique **"Scan manuel"** — déclenche directement sans caméra
+3. Bouton **"Démo automatique"** — enchaîne 5 scans prédéfinis avec 600 ms d'intervalle
+
+### 3. Observer le dashboard en temps réel
+
+Ouvre [`/`](http://localhost:3000) dans une autre fenêtre. Chaque scan met à jour instantanément :
+- Le statut de l'outil (Disponible / Sorti) avec le nom du technicien
+- Les compteurs en haut (disponibles / en utilisation / total)
+- Le feed "Activité récente" (20 derniers événements)
+
+L'indicateur vert pulsant en haut à droite confirme la connexion SSE active.
+
+### 4. Consulter l'historique
+
+[`/history`](http://localhost:3000/history) — liste chronologique de tous les événements de la session.
+
+> **Note** : l'état est in-memory. Un redémarrage du serveur remet tous les outils à "Disponible" et efface l'historique.
+
+---
+
 ## Stack technique
 
 | Couche | Technologie |

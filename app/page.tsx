@@ -65,9 +65,13 @@ export default function Dashboard() {
             <p className="text-xs text-gray-400">Traçabilité outillage · FACOM SCANDIAG</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 text-xs">
-          <div className={`w-2 h-2 rounded-full ${connected ? "bg-emerald-400 animate-pulse" : "bg-red-500"}`} />
-          <span className="text-gray-400">{connected ? "Temps réel" : "Déconnecté"}</span>
+        <div className="flex items-center gap-3 text-xs">
+          <a href="/labels" className="text-gray-400 hover:text-white transition-colors">Étiquettes</a>
+          <a href="/simulator" className="text-gray-400 hover:text-white transition-colors">Simulateur</a>
+          <div className="flex items-center gap-1.5">
+            <div className={`w-2 h-2 rounded-full ${connected ? "bg-emerald-400 animate-pulse" : "bg-red-500"}`} />
+            <span className="text-gray-400">{connected ? "Temps réel" : "Déconnecté"}</span>
+          </div>
         </div>
       </div>
 
