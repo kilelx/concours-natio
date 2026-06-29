@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
+import jsQR from "jsqr"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -21,6 +22,8 @@ const TOOLS = [
   { id: "FC-012", name: "Extracteur courroies" },
 ]
 
+const TOOL_IDS = new Set(TOOLS.map((t) => t.id))
+
 const WORKERS = [
   { id: "W1", name: "Martin Dubois", color: "#3B82F6" },
   { id: "W2", name: "Sophie Laurent", color: "#10B981" },
@@ -28,12 +31,137 @@ const WORKERS = [
   { id: "W4", name: "Julie Moreau", color: "#8B5CF6" },
 ]
 
+function CameraScanner({
+  workerId,
+  onEvent,
+  onClose,
+}: {
+  workerId: string
+  onEvent: (e: ScanEvent) => void
+  onClose: () => void
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const rafRef = useRef<number>(0)
+  const cooldownRef = useRef(false)
+
+  const [detected, setDetected] = useState<string | null>(null)
+  const [processing, setProcessing] = useState(false)
+  const [cameraError, setCameraError] = useState<string | null>(null)
+
+  const handleQR = useCallback(async (toolId: string) => {
+    if (cooldownRef.current || !TOOL_IDS.has(toolId)) return
+    cooldownRef.current = true
+    setDetected(toolId)
+    setProcessing(true)
+    try {
+      const res = await fetch("/api/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool_id: toolId, worker_id: workerId }),
+      })
+      const event: ScanEvent = await res.json()
+      onEvent(event)
+    } finally {
+      setProcessing(false)
+      setTimeout(() => {
+        cooldownRef.current = false
+        setDetected(null)
+      }, 2500)
+    }
+  }, [workerId, onEvent])
+
+  useEffect(() => {
+    let stream: MediaStream | null = null
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment", width: { ideal: 1280 } },
+    }).then((s) => {
+      stream = s
+      if (videoRef.current) {
+        videoRef.current.srcObject = s
+        videoRef.current.play()
+      }
+    }).catch(() => {
+      setCameraError("Accès caméra refusé. Autorisez dans les permissions du navigateur.")
+    })
+    return () => {
+      stream?.getTracks().forEach((t) => t.stop())
+      cancelAnimationFrame(rafRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    const tick = () => {
+      const video = videoRef.current
+      const canvas = canvasRef.current
+      if (!video || !canvas || video.readyState < 2) {
+        rafRef.current = requestAnimationFrame(tick)
+        return
+      }
+      const ctx = canvas.getContext("2d", { willReadFrequently: true })
+      if (!ctx) return
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      ctx.drawImage(video, 0, 0)
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      const code = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" })
+      if (code?.data) handleQR(code.data)
+      rafRef.current = requestAnimationFrame(tick)
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(rafRef.current)
+  }, [handleQR])
+
+  return (
+    <div className="mb-4">
+      <div className="relative w-full rounded-xl overflow-hidden bg-black aspect-video mb-3">
+        {cameraError ? (
+          <div className="absolute inset-0 flex items-center justify-center p-4 text-center">
+            <p className="text-red-400 text-sm">{cameraError}</p>
+          </div>
+        ) : (
+          <>
+            <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className={`w-44 h-44 border-2 rounded-lg transition-colors duration-150 ${
+                detected ? "border-emerald-400 shadow-[0_0_24px_rgba(52,211,153,0.6)]" : "border-white/30"
+              }`} />
+            </div>
+            <div className="absolute top-2 left-2 right-2 flex justify-between items-start">
+              <div className={`text-xs px-2 py-1 rounded-full ${
+                processing ? "bg-amber-500/80 text-white" :
+                detected ? "bg-emerald-600/80 text-white" :
+                "bg-black/60 text-gray-300"
+              }`}>
+                {processing ? "Enregistrement…" : detected ? `${detected} détecté` : "Pointez un QR code"}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+      <canvas ref={canvasRef} className="hidden" />
+      <button
+        onClick={onClose}
+        className="w-full py-2 rounded-xl border border-gray-700 text-gray-400 text-sm hover:border-gray-500 transition-colors"
+      >
+        ✕ Fermer la caméra
+      </button>
+    </div>
+  )
+}
+
 export default function Simulator() {
   const [selectedTool, setSelectedTool] = useState(TOOLS[0].id)
   const [selectedWorker, setSelectedWorker] = useState(WORKERS[0].id)
   const [lastEvent, setLastEvent] = useState<ScanEvent | null>(null)
   const [scanning, setScanning] = useState(false)
   const [log, setLog] = useState<ScanEvent[]>([])
+  const [cameraOpen, setCameraOpen] = useState(false)
+
+  function addEvent(event: ScanEvent) {
+    setLastEvent(event)
+    setLog((prev) => [event, ...prev].slice(0, 10))
+  }
 
   async function scan() {
     setScanning(true)
@@ -43,9 +171,7 @@ export default function Simulator() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tool_id: selectedTool, worker_id: selectedWorker }),
       })
-      const event: ScanEvent = await res.json()
-      setLastEvent(event)
-      setLog((prev) => [event, ...prev].slice(0, 10))
+      addEvent(await res.json())
     } finally {
       setScanning(false)
     }
@@ -107,54 +233,73 @@ export default function Simulator() {
         </CardContent>
       </Card>
 
-      {/* Tool select */}
-      <Card className="bg-gray-900 border-gray-800 mb-4">
-        <CardHeader className="pb-2 pt-3">
-          <CardTitle className="text-sm text-gray-300">Outil à scanner</CardTitle>
-        </CardHeader>
-        <CardContent className="pb-3">
-          <div className="space-y-1">
-            {TOOLS.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => setSelectedTool(t.id)}
-                className={`w-full text-left text-sm px-3 py-2 rounded-lg border transition-all ${
-                  selectedTool === t.id
-                    ? "border-red-600 bg-red-950/30 text-white"
-                    : "border-gray-800 hover:border-gray-600 text-gray-300"
-                }`}
-              >
-                <span className="font-mono text-xs text-gray-500 mr-2">{t.id}</span>
-                {t.name}
-              </button>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      {/* Camera scanner (inline, toggled) */}
+      {cameraOpen && (
+        <CameraScanner
+          workerId={selectedWorker}
+          onEvent={(ev) => { addEvent(ev); setCameraOpen(false) }}
+          onClose={() => setCameraOpen(false)}
+        />
+      )}
 
-      {/* Scan button — big, mobile-friendly */}
-      <button
-        onClick={scan}
-        disabled={scanning}
-        className="w-full h-20 rounded-2xl bg-red-600 hover:bg-red-500 active:bg-red-700 disabled:opacity-50 text-white font-bold text-lg transition-all mb-3 flex items-center justify-center gap-3"
-      >
-        {scanning ? (
-          <span className="animate-pulse">Scan en cours…</span>
-        ) : (
-          <>
-            <span className="text-2xl">📡</span>
-            <span>Scanner l&apos;outil</span>
-          </>
-        )}
-      </button>
+      {/* Tool select — hidden when camera open */}
+      {!cameraOpen && (
+        <Card className="bg-gray-900 border-gray-800 mb-4">
+          <CardHeader className="pb-2 pt-3">
+            <CardTitle className="text-sm text-gray-300">Outil à scanner</CardTitle>
+          </CardHeader>
+          <CardContent className="pb-3">
+            <div className="space-y-1">
+              {TOOLS.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setSelectedTool(t.id)}
+                  className={`w-full text-left text-sm px-3 py-2 rounded-lg border transition-all ${
+                    selectedTool === t.id
+                      ? "border-red-600 bg-red-950/30 text-white"
+                      : "border-gray-800 hover:border-gray-600 text-gray-300"
+                  }`}
+                >
+                  <span className="font-mono text-xs text-gray-500 mr-2">{t.id}</span>
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
-      <Button
-        variant="outline"
-        className="w-full border-gray-700 text-gray-300 mb-4"
-        onClick={runDemo}
-      >
-        ▶ Démo automatique (5 scans)
-      </Button>
+      {/* Scan button */}
+      {!cameraOpen && (
+        <button
+          onClick={() => setCameraOpen(true)}
+          disabled={scanning}
+          className="w-full h-20 rounded-2xl bg-red-600 hover:bg-red-500 active:bg-red-700 disabled:opacity-50 text-white font-bold text-lg transition-all mb-3 flex items-center justify-center gap-3"
+        >
+          <span className="text-2xl">📡</span>
+          <span>Scanner l&apos;outil</span>
+        </button>
+      )}
+
+      {/* Manual scan fallback */}
+      {!cameraOpen && (
+        <div className="flex gap-2 mb-4">
+          <button
+            onClick={scan}
+            disabled={scanning}
+            className="flex-1 py-2 rounded-xl border border-gray-700 text-gray-400 text-sm hover:border-gray-500 disabled:opacity-50 transition-colors"
+          >
+            {scanning ? "Scan en cours…" : "Scan manuel (outil sélectionné)"}
+          </button>
+          <Button
+            variant="outline"
+            className="border-gray-700 text-gray-300"
+            onClick={runDemo}
+          >
+            ▶ Démo
+          </Button>
+        </div>
+      )}
 
       {/* Last event feedback */}
       {lastEvent && (

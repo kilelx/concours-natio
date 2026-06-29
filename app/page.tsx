@@ -135,7 +135,9 @@ export default function Dashboard() {
             {events.length === 0 && (
               <p className="text-xs text-gray-500">
                 Aucun scan.{" "}
-                <a href="/simulator" className="underline text-gray-400">Ouvrir le simulateur →</a>
+                <a href="/simulator" className="underline text-gray-400">Simulateur →</a>
+                {" "}ou{" "}
+                <a href="/scanner" className="underline text-gray-400">Scanner caméra →</a>
               </p>
             )}
             {events.map((ev) => {
